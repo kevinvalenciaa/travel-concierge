@@ -1,0 +1,89 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    /* Soft pastel primary color - sage green */
+    --primary: 266 100% 66%; /* This is the purple from our gradient */
+    --primary-foreground: 0 0% 100%;
+    /* Soft secondary color - light lavender */
+    --secondary: 240 30% 96%;
+    --secondary-foreground: 240 5.9% 10%;
+    /* Muted pastel color - soft gray */
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    /* Soft accent color - pale pink */
+    --accent: 346 85% 95%;
+    --accent-foreground: 240 5.9% 10%;
+    /* Destructive remains strong for important actions */
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    /* Subtle borders */
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 151 40% 50%;
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 20 14.3% 4.1%;
+    --foreground: 0 0% 95%;
+    --card: 24 9.8% 10%;
+    --card-foreground: 0 0% 95%;
+    --popover: 0 0% 9%;
+    --popover-foreground: 0 0% 95%;
+    /* Darker but still soft primary */
+    --primary: 266 100% 66%;
+    --primary-foreground: 0 0% 100%;
+    /* Dark mode secondary */
+    --secondary: 240 30% 20%;
+    --secondary-foreground: 0 0% 98%;
+    /* Dark mode muted */
+    --muted: 0 0% 15%;
+    --muted-foreground: 240 5% 64.9%;
+    /* Dark mode accent */
+    --accent: 346 50% 20%;
+    --accent-foreground: 0 0% 98%;
+    /* Dark mode destructive */
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 85.7% 97.3%;
+    /* Dark mode borders */
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 151 40% 40%;
+  }
+}
+
+/* Modern typography */
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply tracking-tight;
+  }
+}
+
+/* Smooth transitions */
+@layer utilities {
+  .transition-all {
+    @apply duration-300 ease-in-out;
+  }
+}
+
