@@ -15,11 +15,31 @@ const nextConfig = {
   },
   images: {
     unoptimized: true,
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "images.unsplash.com",
+      },
+      {
+        protocol: "https",
+        hostname: "plus.unsplash.com",
+      },
+    ],
   },
   experimental: {
     webpackBuildWorker: true,
     parallelServerBuildTraces: true,
     parallelServerCompiles: true,
+  },
+  reactStrictMode: true,
+  swcMinify: true,
+  // Add server-side environment variables
+  serverRuntimeConfig: {
+    GOOGLE_GEMINI_API_KEY: process.env.GOOGLE_GEMINI_API_KEY,
+  },
+  // Expose environment variables to the browser
+  publicRuntimeConfig: {
+    // Empty for now, but we can add variables that should be available in the browser
   },
 }
 

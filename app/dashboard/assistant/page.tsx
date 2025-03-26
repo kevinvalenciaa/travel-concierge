@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -33,26 +33,27 @@ export default function AssistantPage() {
   const [input, setInput] = useState("")
   const [isLoading, setIsLoading] = useState(false)
 
-  // Function to generate a simple AI response
-  const generateAIResponse = async (userMessage: string) => {
-    // Simulate API delay
-    await new Promise((resolve) => setTimeout(resolve, 1000))
+  // Function to get response from the AI
+  const getAIResponse = async (userMessage: string) => {
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ message: userMessage }),
+      });
 
-    // Generate a contextual response based on the user's message
-    let response = "I understand you're interested in "
-    if (userMessage.toLowerCase().includes("weekend")) {
-      response += "planning a weekend getaway. I can help you find destinations that fit your budget and timeframe."
-    } else if (userMessage.toLowerCase().includes("bali")) {
-      response += "visiting Bali. The best time to visit is typically during the dry season, from April to October."
-    } else if (userMessage.toLowerCase().includes("london")) {
-      response += "exploring London with your family. I'll suggest some kid-friendly attractions and activities."
-    } else if (userMessage.toLowerCase().includes("paris")) {
-      response += "romantic dining in Paris. I know several intimate restaurants with amazing views."
-    } else {
-      response += "travel planning. Could you tell me more about your preferences?"
+      if (!response.ok) {
+        throw new Error('Failed to get AI response');
+      }
+
+      const data = await response.json();
+      return data.response;
+    } catch (error) {
+      console.error('Error getting AI response:', error);
+      return "I'm sorry, I encountered an error while processing your request. Please try again.";
     }
-
-    return response
   }
 
   const handleSendMessage = async (content: string) => {
@@ -68,12 +69,12 @@ export default function AssistantPage() {
     setInput("")
     setIsLoading(true)
 
-    // Generate and add AI response
-    const aiResponse = await generateAIResponse(content)
+    // Get and add AI response
+    const aiResponseText = await getAIResponse(content);
     const assistantMessage: Message = {
       id: (Date.now() + 1).toString(),
       role: "assistant",
-      content: aiResponse,
+      content: aiResponseText,
     }
     setMessages((prev) => [...prev, assistantMessage])
     setIsLoading(false)
@@ -91,14 +92,14 @@ export default function AssistantPage() {
   return (
     <div className="flex-1 space-y-8 p-8 pt-6">
       <div>
-        <h2 className="text-3xl font-bold tracking-tight">AI Travel Assistant</h2>
+        <h2 className="text-3xl font-bold tracking-tight">Voyentra AI Travel Assistant</h2>
         <p className="text-muted-foreground">Your personal AI travel planner and guide</p>
       </div>
 
       <div className="grid gap-8 md:grid-cols-[1fr_300px]">
         <Card className="flex h-[700px] flex-col">
           <CardHeader>
-            <CardTitle>Chat with AI Assistant</CardTitle>
+            <CardTitle>Chat with Voyentra AI</CardTitle>
           </CardHeader>
           <ScrollArea className="flex-1 p-4">
             <div className="space-y-4">
