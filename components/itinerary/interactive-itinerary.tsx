@@ -20,10 +20,17 @@ import {
   MoveUp,
   MoveDown,
   CalendarIcon,
+  Pencil,
+  Trash2,
+  ChevronRight,
+  Download,
+  Info,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { useProfile } from "@/contexts/profile-context"
 import { createEvents, type DateArray } from "ics"
+import { ActivityInfo, type ActivityDetail } from "./activity-info"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 
 interface Activity {
   id: string
@@ -32,6 +39,7 @@ interface Activity {
   title: string
   description: string
   priceRange?: string
+  details?: ActivityDetail
 }
 
 interface DaySchedule {
@@ -72,16 +80,88 @@ interface InteractiveItineraryProps {
   initialItinerary?: DaySchedule[]
   onItineraryChange?: (itinerary: DaySchedule[]) => void
   readOnly?: boolean
+  renderActivityDetails?: (activity: Activity) => React.ReactNode
+}
+
+function getIconForActivity(icon?: keyof typeof icons) {
+  const IconComponent = icon && icons[icon] ? icons[icon] : Landmark;
+  return <IconComponent className="h-5 w-5 text-primary" />;
+}
+
+function ActivityItem({
+  activity,
+  onEdit,
+  onDelete,
+  readOnly = false,
+  renderActivityDetails
+}: {
+  activity: Activity
+  onEdit?: (activity: Activity) => void
+  onDelete?: (id: string) => void
+  readOnly?: boolean
+  renderActivityDetails?: (activity: Activity) => React.ReactNode
+}) {
+  const isLastActivity = false // Used for rendering visual connectors
+
+  return (
+    <div className="flex items-start group">
+      <div className="flex-none flex flex-col items-center mr-4">
+        <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+          {getIconForActivity(activity.icon)}
+        </div>
+        {!isLastActivity && <div className="w-0.5 grow bg-border mt-2"></div>}
+      </div>
+      <div className="flex-grow min-w-0 pt-1 pb-6">
+        <div className="flex justify-between items-start">
+          <div className="flex-grow">
+            <div className="flex items-center">
+              <p className="text-sm text-muted-foreground">{activity.time}</p>
+              {activity.priceRange && (
+                <Badge variant="outline" className="ml-2">
+                  {activity.priceRange}
+                </Badge>
+              )}
+            </div>
+            <h3 className="font-medium">{activity.title}</h3>
+            {activity.description && <p className="text-sm text-muted-foreground mt-1">{activity.description}</p>}
+          </div>
+          <div className="flex items-center gap-2 ml-2">
+            {activity.details && (
+              <ActivityInfo 
+                title={activity.title} 
+                description={activity.description}
+                details={activity.details}
+              />
+            )}
+            
+            {renderActivityDetails && renderActivityDetails(activity)}
+            
+            {!readOnly && (
+              <>
+                <Button variant="ghost" size="icon" onClick={() => onEdit && onEdit(activity)}>
+                  <Pencil className="h-4 w-4" />
+                </Button>
+                <Button variant="ghost" size="icon" onClick={() => onDelete && onDelete(activity.id)}>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export function InteractiveItinerary({
   tripId,
   initialItinerary,
   onItineraryChange,
-  readOnly,
+  readOnly = false,
+  renderActivityDetails,
 }: InteractiveItineraryProps) {
   const { profile } = useProfile()
-  const [schedule, setSchedule] = useState<DaySchedule[]>(
+  const [itinerary, setItinerary] = useState<DaySchedule[]>(
     initialItinerary || [
       {
         day: 1,
@@ -104,113 +184,115 @@ export function InteractiveItinerary({
       },
     ],
   )
+  const [openDays, setOpenDays] = useState<Record<number, boolean>>({})
+  const [editingDay, setEditingDay] = useState<number | null>(null)
+  const [editingActivity, setEditingActivity] = useState<Activity | null>(null)
 
   useEffect(() => {
     if (initialItinerary) {
-      setSchedule(initialItinerary)
+      setItinerary(initialItinerary)
+      // Initialize all days as open
+      const initialOpenDays: Record<number, boolean> = {}
+      initialItinerary.forEach(day => {
+        initialOpenDays[day.day] = true
+      })
+      setOpenDays(initialOpenDays)
     }
   }, [initialItinerary])
 
-  const handleDragEnd = (result: any) => {
-    if (!result.destination) return
-
-    const sourceDay = Number.parseInt(result.source.droppableId)
-    const destinationDay = Number.parseInt(result.destination.droppableId)
-    const sourceIndex = result.source.index
-    const destinationIndex = result.destination.index
-
-    const newSchedule = [...schedule]
-    const sourceDaySchedule = newSchedule.find((day) => day.day === sourceDay)
-    const destDaySchedule = newSchedule.find((day) => day.day === destinationDay)
-
-    if (!sourceDaySchedule || !destDaySchedule) return
-
-    const [movedActivity] = sourceDaySchedule.activities.splice(sourceIndex, 1)
-    destDaySchedule.activities.splice(destinationIndex, 0, movedActivity)
-
-    setSchedule(newSchedule)
-    onItineraryChange?.(newSchedule)
+  const handleDayToggle = (dayNumber: number, isOpen: boolean) => {
+    setOpenDays(prev => ({
+      ...prev,
+      [dayNumber]: isOpen
+    }))
   }
 
-  const moveActivity = (dayIndex: number, activityIndex: number, direction: "up" | "down") => {
-    const newSchedule = [...schedule]
-    const day = newSchedule[dayIndex]
-    const activities = [...day.activities]
-
-    if (direction === "up" && activityIndex > 0) {
-      // Move activity up within the same day
-      ;[activities[activityIndex], activities[activityIndex - 1]] = [
-        activities[activityIndex - 1],
-        activities[activityIndex],
-      ]
-    } else if (direction === "down" && activityIndex < activities.length - 1) {
-      // Move activity down within the same day
-      ;[activities[activityIndex], activities[activityIndex + 1]] = [
-        activities[activityIndex + 1],
-        activities[activityIndex],
-      ]
-    } else if (direction === "up" && dayIndex > 0) {
-      // Move activity to previous day
-      const activity = activities[activityIndex]
-      activities.splice(activityIndex, 1)
-      newSchedule[dayIndex - 1].activities.push(activity)
-    } else if (direction === "down" && dayIndex < newSchedule.length - 1) {
-      // Move activity to next day
-      const activity = activities[activityIndex]
-      activities.splice(activityIndex, 1)
-      newSchedule[dayIndex + 1].activities.unshift(activity)
-    }
-
-    day.activities = activities
-    setSchedule(newSchedule)
-    onItineraryChange?.(newSchedule)
+  const handleEditActivity = (activity: Activity) => {
+    setEditingActivity(activity)
   }
 
-  const handleAddActivity = (dayId: number) => {
-    const newActivity: Activity = {
-      id: `new-${Date.now()}`,
-      icon: "attraction",
-      time: "12:00",
-      title: "New Activity",
-      description: "Description",
-    }
+  const handleDeleteActivity = (activityId: string) => {
+    const newItinerary = itinerary.map(day => ({
+      ...day,
+      activities: day.activities.filter(a => a.id !== activityId)
+    }))
+    setItinerary(newItinerary)
+    onItineraryChange?.(newItinerary)
+  }
 
-    const newSchedule = schedule.map((day) => {
-      if (day.day === dayId) {
+  const handleActivitySubmit = (activityData: Activity) => {
+    if (editingActivity) {
+      // Edit existing activity
+      const newItinerary = itinerary.map(day => ({
+        ...day,
+        activities: day.activities.map(a => 
+          a.id === editingActivity.id ? { ...activityData, id: a.id } : a
+        )
+      }))
+      setItinerary(newItinerary)
+      onItineraryChange?.(newItinerary)
+    } else if (editingDay !== null) {
+      // Add new activity
+      const newActivity = {
+        ...activityData,
+        id: `${Date.now()}`
+      }
+      const newItinerary = itinerary.map(day => {
+        if (day.day === editingDay) {
+          return {
+            ...day,
+            activities: [...day.activities, newActivity]
+          }
+        }
+        return day
+      })
+      setItinerary(newItinerary)
+      onItineraryChange?.(newItinerary)
+    }
+    
+    setEditingActivity(null)
+    setEditingDay(null)
+  }
+
+  const handleDragEnd = (event: any, dayNumber: number) => {
+    const { active, over } = event
+    
+    if (!over || active.id === over.id) {
+      return
+    }
+    
+    const activeId = active.id
+    const overId = over.id
+    
+    const dayToUpdate = itinerary.find(d => d.day === dayNumber)
+    
+    if (!dayToUpdate) return
+    
+    const activeIndex = dayToUpdate.activities.findIndex(a => a.id === activeId)
+    const overIndex = dayToUpdate.activities.findIndex(a => a.id === overId)
+    
+    if (activeIndex === -1 || overIndex === -1) return
+    
+    const newItinerary = itinerary.map(day => {
+      if (day.day === dayNumber) {
+        const updatedActivities = [...day.activities]
+        const [movedActivity] = updatedActivities.splice(activeIndex, 1)
+        updatedActivities.splice(overIndex, 0, movedActivity)
+        
         return {
           ...day,
-          activities: [...day.activities, newActivity],
+          activities: updatedActivities
         }
       }
       return day
     })
-
-    setSchedule(newSchedule)
-    onItineraryChange?.(newSchedule)
-  }
-
-  const handleEditActivity = (dayId: number, activity: Activity) => {
-    const newSchedule = schedule.map((day) => ({
-      ...day,
-      activities: day.activities.map((a) => (a.id === activity.id ? activity : a)),
-    }))
-
-    setSchedule(newSchedule)
-    onItineraryChange?.(newSchedule)
-  }
-
-  const handleDeleteActivity = (activityId: string) => {
-    const newSchedule = schedule.map((day) => ({
-      ...day,
-      activities: day.activities.filter((a) => a.id !== activityId),
-    }))
-
-    setSchedule(newSchedule)
-    onItineraryChange?.(newSchedule)
+    
+    setItinerary(newItinerary)
+    onItineraryChange?.(newItinerary)
   }
 
   const downloadCalendar = () => {
-    const events = schedule.flatMap((day) => {
+    const events = itinerary.flatMap((day) => {
       return day.activities.map((activity) => {
         // Parse the time string (assuming format "HH:mm")
         const [hours, minutes] = activity.time.split(":").map(Number)
@@ -275,163 +357,169 @@ export function InteractiveItinerary({
       <div className="flex justify-between items-center">
         <h2 className="text-lg font-semibold">Itinerary</h2>
         <Button variant="outline" size="sm" onClick={downloadCalendar} className="flex items-center gap-2">
-          <CalendarIcon className="h-4 w-4" />
-          Add to Calendar
+          <Download className="h-4 w-4" /> Export Calendar
         </Button>
       </div>
 
-      <DragDropContext onDragEnd={handleDragEnd}>
-        {schedule.map((day, dayIndex) => (
-          <Card key={day.day}>
-            <CardContent className="p-6">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-semibold">Day {day.day}</h3>
+      <div className="space-y-6">
+        {itinerary.map((day, dayIndex) => (
+          <div key={day.day} className="space-y-4">
+            <Collapsible open={openDays[day.day]} onOpenChange={(open) => handleDayToggle(day.day, open)}>
+              <div className="flex items-center gap-2">
+                <CollapsibleTrigger asChild>
+                  <Button variant="ghost" size="sm" className="p-0 h-6 data-[state=open]:rotate-90 transition-transform">
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </CollapsibleTrigger>
+                <h3 className="font-semibold">Day {day.day}</h3>
                 {!readOnly && (
-                  <Button variant="outline" size="sm" onClick={() => handleAddActivity(day.day)}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Activity
+                  <Button variant="ghost" size="sm" onClick={() => setEditingDay(day.day)}>
+                    <Plus className="h-4 w-4 mr-1" /> Add Activity
                   </Button>
                 )}
               </div>
-              <Droppable droppableId={day.day.toString()}>
-                {(provided) => (
-                  <div {...provided.droppableProps} ref={provided.innerRef} className="space-y-4">
-                    {day.activities.map((activity, activityIndex) => {
-                      const Icon = icons[activity.icon]
-                      return (
-                        <Draggable key={activity.id} draggableId={activity.id} index={activityIndex}>
-                          {(provided) => (
-                            <div ref={provided.innerRef} {...provided.draggableProps} className="group relative">
-                              <Card>
-                                <CardContent className="p-4">
-                                  <div className="flex items-start gap-4">
-                                    {!readOnly && (
-                                      <div
-                                        {...provided.dragHandleProps}
-                                        className="mt-1.5 text-muted-foreground cursor-grab"
-                                      >
-                                        <GripVertical className="h-4 w-4" />
-                                      </div>
-                                    )}
-                                    <div className="flex-1">
-                                      <div className="flex items-center gap-2">
-                                        <Icon className="h-4 w-4 text-primary" />
-                                        <span className="text-sm text-muted-foreground">{activity.time}</span>
-                                        {activity.priceRange && (
-                                          <Badge variant="secondary">
-                                            {activity.priceRange?.replace(/€/g, getCurrencySymbol(profile.currency))}
-                                          </Badge>
-                                        )}
-                                      </div>
-                                      <h4 className="font-medium mt-1">{activity.title}</h4>
-                                      <p className="text-sm text-muted-foreground">{activity.description}</p>
-                                    </div>
-                                    {!readOnly && (
-                                      <div className="flex gap-2">
-                                        <div className="flex flex-col gap-1">
-                                          <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-6 w-6"
-                                            onClick={() => moveActivity(dayIndex, activityIndex, "up")}
-                                            disabled={activityIndex === 0 && dayIndex === 0}
-                                          >
-                                            <MoveUp className="h-4 w-4" />
-                                          </Button>
-                                          <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-6 w-6"
-                                            onClick={() => moveActivity(dayIndex, activityIndex, "down")}
-                                            disabled={
-                                              activityIndex === day.activities.length - 1 &&
-                                              dayIndex === schedule.length - 1
-                                            }
-                                          >
-                                            <MoveDown className="h-4 w-4" />
-                                          </Button>
-                                        </div>
-                                        <Dialog>
-                                          <DialogTrigger asChild>
-                                            <Button
-                                              variant="ghost"
-                                              size="sm"
-                                              className="opacity-0 group-hover:opacity-100"
-                                            >
-                                              <Edit className="h-4 w-4" />
-                                            </Button>
-                                          </DialogTrigger>
-                                          <DialogContent>
-                                            <DialogHeader>
-                                              <DialogTitle>Edit Activity</DialogTitle>
-                                            </DialogHeader>
-                                            <div className="space-y-4 py-4">
-                                              <div className="space-y-2">
-                                                <Input
-                                                  placeholder="Time"
-                                                  value={activity.time}
-                                                  onChange={(e) =>
-                                                    handleEditActivity(day.day, {
-                                                      ...activity,
-                                                      time: e.target.value,
-                                                    })
-                                                  }
-                                                />
-                                              </div>
-                                              <div className="space-y-2">
-                                                <Input
-                                                  placeholder="Title"
-                                                  value={activity.title}
-                                                  onChange={(e) =>
-                                                    handleEditActivity(day.day, {
-                                                      ...activity,
-                                                      title: e.target.value,
-                                                    })
-                                                  }
-                                                />
-                                              </div>
-                                              <div className="space-y-2">
-                                                <Input
-                                                  placeholder="Description"
-                                                  value={activity.description}
-                                                  onChange={(e) =>
-                                                    handleEditActivity(day.day, {
-                                                      ...activity,
-                                                      description: e.target.value,
-                                                    })
-                                                  }
-                                                />
-                                              </div>
-                                            </div>
-                                          </DialogContent>
-                                        </Dialog>
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          className="opacity-0 group-hover:opacity-100"
-                                          onClick={() => handleDeleteActivity(activity.id)}
-                                        >
-                                          <Trash className="h-4 w-4" />
-                                        </Button>
-                                      </div>
-                                    )}
-                                  </div>
-                                </CardContent>
-                              </Card>
-                            </div>
-                          )}
-                        </Draggable>
-                      )
-                    })}
-                    {provided.placeholder}
+              
+              <CollapsibleContent className="mt-4 ml-1 space-y-1">
+                {day.activities.length === 0 ? (
+                  <p className="text-sm text-muted-foreground pl-4">No activities scheduled for this day.</p>
+                ) : (
+                  <div className="pl-4">
+                    {day.activities.map((activity) => (
+                      <div key={activity.id}>
+                        <ActivityItem 
+                          activity={activity} 
+                          onEdit={!readOnly ? handleEditActivity : undefined} 
+                          onDelete={!readOnly ? handleDeleteActivity : undefined}
+                          readOnly={readOnly}
+                          renderActivityDetails={renderActivityDetails}
+                        />
+                      </div>
+                    ))}
                   </div>
                 )}
-              </Droppable>
-            </CardContent>
-          </Card>
+              </CollapsibleContent>
+            </Collapsible>
+          </div>
         ))}
-      </DragDropContext>
+      </div>
+
+      {(editingDay !== null || editingActivity !== null) && (
+        <Dialog open={true} onOpenChange={(open) => {
+          if (!open) {
+            setEditingDay(null)
+            setEditingActivity(null)
+          }
+        }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{editingActivity ? "Edit Activity" : "Add Activity"}</DialogTitle>
+            </DialogHeader>
+            <ActivityForm 
+              onSubmit={handleActivitySubmit} 
+              initialValues={editingActivity} 
+            />
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
+  )
+}
+
+// Placeholder for ActivityForm component
+function ActivityForm({ 
+  onSubmit,
+  initialValues
+}: { 
+  onSubmit: (data: Activity) => void
+  initialValues?: Activity | null
+}) {
+  const [activityData, setActivityData] = useState<Partial<Activity>>(
+    initialValues || {
+      icon: "attraction",
+      time: "12:00",
+      title: "",
+      description: "",
+      priceRange: "€€"
+    }
+  )
+  
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    onSubmit(activityData as Activity)
+  }
+  
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Time</label>
+        <Input 
+          type="time"
+          value={activityData.time}
+          onChange={(e) => setActivityData({...activityData, time: e.target.value})}
+          required
+        />
+      </div>
+      
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Title</label>
+        <Input 
+          value={activityData.title}
+          onChange={(e) => setActivityData({...activityData, title: e.target.value})}
+          placeholder="Activity title"
+          required
+        />
+      </div>
+      
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Description</label>
+        <Input 
+          value={activityData.description}
+          onChange={(e) => setActivityData({...activityData, description: e.target.value})}
+          placeholder="Brief description"
+          required
+        />
+      </div>
+      
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Icon</label>
+        <div className="flex gap-2">
+          {Object.entries(icons).map(([key, Icon]) => (
+            <Button
+              key={key}
+              type="button"
+              size="sm"
+              variant={activityData.icon === key ? "default" : "outline"}
+              onClick={() => setActivityData({...activityData, icon: key as keyof typeof icons})}
+            >
+              <Icon className="h-4 w-4" />
+            </Button>
+          ))}
+        </div>
+      </div>
+      
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Price Range</label>
+        <div className="flex gap-2">
+          {["€", "€€", "€€€"].map((price) => (
+            <Button
+              key={price}
+              type="button"
+              size="sm"
+              variant={activityData.priceRange === price ? "default" : "outline"}
+              onClick={() => setActivityData({...activityData, priceRange: price})}
+            >
+              {price}
+            </Button>
+          ))}
+        </div>
+      </div>
+      
+      <div className="flex justify-end pt-2">
+        <Button type="submit">
+          {initialValues ? "Update Activity" : "Add Activity"}
+        </Button>
+      </div>
+    </form>
   )
 }
 
