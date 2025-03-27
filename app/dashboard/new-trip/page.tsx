@@ -22,6 +22,7 @@ export default function NewTripPage() {
   const router = useRouter()
   const { toast } = useToast()
   const { profile } = useProfile()
+  const [generatedItinerary, setGeneratedItinerary] = useState<any>(null)
 
   const [formData, setFormData] = useState({
     destination: "",
@@ -31,6 +32,8 @@ export default function NewTripPage() {
     },
     budget: [1000],
     travelers: "", // New field for number of travelers
+    tripType: "general", // Type of trip (family, couple, business, etc.)
+    interests: [] as string[], // Interests for personalized activities
   })
 
   const [errors, setErrors] = useState({
@@ -88,7 +91,10 @@ export default function NewTripPage() {
     }
   }
 
-  const handlePreviewComplete = () => {
+  const handlePreviewComplete = (itineraryData?: any) => {
+    if (itineraryData) {
+      setGeneratedItinerary(itineraryData);
+    }
     setStep("preview")
   }
 
@@ -97,7 +103,10 @@ export default function NewTripPage() {
   }
 
   if (step === "loading") {
-    return <PreviewDemo onComplete={handlePreviewComplete} />
+    return <PreviewDemo 
+      onComplete={handlePreviewComplete} 
+      formData={formData}
+    />
   }
 
   if (step === "preview") {
@@ -109,6 +118,7 @@ export default function NewTripPage() {
         endDate={formData.dates.end}
         destination={formData.destination}
         travelers={Number.parseInt(formData.travelers)}
+        generatedItinerary={generatedItinerary}
       />
     )
   }
@@ -176,7 +186,7 @@ export default function NewTripPage() {
                       onSelect={(date) => {
                         setFormData((prev) => ({
                           ...prev,
-                          dates: { ...prev.dates, start: date },
+                          dates: { ...prev.dates, start: date as Date | null },
                         }))
                         if (errors.dates) {
                           setErrors((prev) => ({ ...prev, dates: "" }))
@@ -206,7 +216,7 @@ export default function NewTripPage() {
                       onSelect={(date) => {
                         setFormData((prev) => ({
                           ...prev,
-                          dates: { ...prev.dates, end: date },
+                          dates: { ...prev.dates, end: date as Date | null },
                         }))
                         if (errors.dates) {
                           setErrors((prev) => ({ ...prev, dates: "" }))
@@ -235,6 +245,48 @@ export default function NewTripPage() {
                   {profile.currency} {formData.budget}
                 </span>
                 <span>{profile.currency} 2000+</span>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Type of Trip</Label>
+              <div className="grid grid-cols-3 gap-2">
+                {["general", "family", "couple", "friends", "solo", "business"].map((type) => (
+                  <Button
+                    key={type}
+                    type="button"
+                    variant={formData.tripType === type ? "default" : "outline"}
+                    className="capitalize"
+                    onClick={() => setFormData((prev) => ({ ...prev, tripType: type }))}
+                  >
+                    {type}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Interests (Select all that apply)</Label>
+              <div className="grid grid-cols-2 gap-2">
+                {["history", "food", "adventure", "culture", "nature", "shopping", "relaxation", "nightlife"].map((interest) => (
+                  <Button
+                    key={interest}
+                    type="button"
+                    variant={formData.interests.includes(interest) ? "default" : "outline"}
+                    className="capitalize"
+                    onClick={() => {
+                      setFormData((prev) => {
+                        if (prev.interests.includes(interest)) {
+                          return { ...prev, interests: prev.interests.filter(i => i !== interest) };
+                        } else {
+                          return { ...prev, interests: [...prev.interests, interest] };
+                        }
+                      });
+                    }}
+                  >
+                    {interest}
+                  </Button>
+                ))}
               </div>
             </div>
           </div>

@@ -132,6 +132,7 @@ interface PreviewResultsProps {
   endDate?: Date | null
   destination?: string
   travelers?: number
+  generatedItinerary?: any
 }
 
 interface FlightFilters {
@@ -155,6 +156,7 @@ export function PreviewResults({
   endDate,
   destination = "Paris, France",
   travelers = 1,
+  generatedItinerary = null,
 }: PreviewResultsProps) {
   const router = useRouter()
   const { addTrip } = useTrips()
@@ -212,8 +214,14 @@ export function PreviewResults({
     })
   }, [hotelFilters])
 
-  // Generate itinerary based on date range
-  const generatedItinerary = useMemo(() => {
+  // Generate itinerary based on date range or use AI-generated one
+  const generatedItineraryData = useMemo(() => {
+    // If we have AI-generated itinerary, use it
+    if (generatedItinerary && generatedItinerary.itinerary) {
+      return generatedItinerary.itinerary;
+    }
+
+    // Fallback to simple generated itinerary if AI data is not available
     if (!startDate || !endDate) return []
 
     const days = eachDayOfInterval({ start: startDate, end: endDate })
@@ -222,7 +230,7 @@ export function PreviewResults({
       day: index + 1,
       activities: generateActivitiesForDay(index + 1, destination),
     }))
-  }, [startDate, endDate, destination])
+  }, [startDate, endDate, destination, generatedItinerary])
 
   const hasBookings = selectedFlight !== null && selectedHotel !== null
   const buttonText = hasBookings ? "Confirm Trip" : "Plan Trip"
@@ -235,7 +243,7 @@ export function PreviewResults({
       image: "/placeholder.svg?height=200&width=300",
       dates: `${format(startDate, "MMM d")} - ${format(endDate, "MMM d, yyyy")}`,
       status: hasBookings ? "Confirmed" : "Planning",
-      activities: generatedItinerary.reduce((acc, day) => acc + day.activities.length, 0),
+      activities: generatedItineraryData.reduce((acc: number, day: { activities: any[] }) => acc + day.activities.length, 0),
       budget: currentBudget[0],
       bookings: {
         flight: selectedFlight ? `Booked - ${selectedFlight.airline}` : "Not Booked",
@@ -250,7 +258,7 @@ export function PreviewResults({
             duration: selectedFlight.duration,
           }
         : undefined,
-      itinerary: generatedItinerary,
+      itinerary: generatedItineraryData,
     })
 
     toast({
@@ -263,6 +271,14 @@ export function PreviewResults({
     onConfirm()
     router.push("/dashboard/trips")
   }
+
+  // Generate itinerary JSX using the AI-generated data or fallback
+  const itineraryContent = (
+    <InteractiveItinerary
+      initialItinerary={generatedItineraryData}
+      readOnly={false}
+    />
+  )
 
   return (
     <div className="container max-w-7xl py-8">
@@ -778,8 +794,8 @@ export function PreviewResults({
             </div>
           </TabsContent>
 
-          <TabsContent value="itinerary" className="min-h-[500px]">
-            <InteractiveItinerary initialItinerary={generatedItinerary} />
+          <TabsContent value="itinerary" className="p-4">
+            {itineraryContent}
           </TabsContent>
         </Tabs>
       </motion.div>
@@ -789,45 +805,144 @@ export function PreviewResults({
 
 // Helper function to generate activities for each day
 function generateActivitiesForDay(day: number, destination: string) {
-  // Sample activities based on the day number
+  // Get destination-specific activities
+  const destinationActivities = getDestinationActivities(destination);
+  
+  // Morning activity
   const morningActivity = {
     id: `${day}-1`,
     icon: "attraction" as const,
     time: "09:00",
-    title: day === 1 ? "City Orientation Tour" : `Day ${day} Morning Activity`,
-    description: `Explore ${destination}'s highlights`,
+    title: destinationActivities.morningActivities[day % destinationActivities.morningActivities.length],
+    description: `Explore this famous attraction in ${destination}`,
     priceRange: "€€",
-  }
+  };
 
-  const afternoonActivity = {
+  // Lunch activity
+  const lunchActivity = {
     id: `${day}-2`,
     icon: "food" as const,
     time: "13:00",
-    title: `Local Cuisine Experience`,
-    description: "Traditional local food tasting",
+    title: destinationActivities.restaurants[day % destinationActivities.restaurants.length],
+    description: `Enjoy delicious local cuisine in ${destination}`,
     priceRange: "€€",
-  }
+  };
 
+  // Afternoon/evening activity
   const eveningActivity = {
     id: `${day}-3`,
     icon: day === 1 ? "hotel" : ("entertainment" as const),
     time: day === 1 ? "15:00" : "19:00",
-    title: day === 1 ? "Hotel Check-in" : "Evening Entertainment",
-    description: day === 1 ? "Luxury accommodation" : "Local cultural experience",
+    title: day === 1 
+      ? `Hotel Check-in in ${destinationActivities.neighborhoods[0]}`
+      : destinationActivities.eveningActivities[(day - 1) % destinationActivities.eveningActivities.length],
+    description: day === 1 
+      ? `Check in to your accommodation in ${destination}` 
+      : `Experience the local nightlife and entertainment in ${destination}`,
     priceRange: "€€€",
-  }
+  };
 
   // First day includes hotel check-in
   if (day === 1) {
-    return [morningActivity, afternoonActivity, eveningActivity]
+    return [morningActivity, lunchActivity, eveningActivity];
   }
 
   // Last day typically ends earlier
   if (day === 7) {
-    return [morningActivity, afternoonActivity]
+    return [morningActivity, lunchActivity];
   }
 
+  // For other days, add a dinner activity
+  const dinnerActivity = {
+    id: `${day}-4`,
+    icon: "food" as const,
+    time: "19:00",
+    title: destinationActivities.dinnerSpots[day % destinationActivities.dinnerSpots.length],
+    description: `Dinner at this well-known restaurant in ${destination}`,
+    priceRange: "€€",
+  };
+
   // Regular days have a full schedule
-  return [morningActivity, afternoonActivity, eveningActivity]
+  return [morningActivity, lunchActivity, eveningActivity, dinnerActivity];
+}
+
+// Helper function to provide destination-specific activities
+function getDestinationActivities(destination: string) {
+  // Default activities for any destination
+  const defaultActivities = {
+    morningActivities: ["City Tour", "Museum Visit", "Local Market Tour"],
+    afternoonActivities: ["Historical District Tour", "Cultural Experience", "Shopping District"],
+    eveningActivities: ["Cultural Show", "Local Music Venue", "Sunset Cruise"],
+    restaurants: ["Local Cuisine Restaurant", "Popular Eatery", "Traditional Dining Experience"],
+    dinnerSpots: ["Highly-Rated Restaurant", "Authentic Local Dining", "Scenic Dinner Spot"],
+    neighborhoods: ["Downtown", "Tourist District", "Popular Area"]
+  };
+
+  // Lowercase the destination for easier matching
+  const lowerDestination = destination.toLowerCase();
+  
+  // Destination-specific activities
+  if (lowerDestination.includes("hawaii") || lowerDestination.includes("honolulu") || lowerDestination.includes("maui")) {
+    return {
+      morningActivities: ["Diamond Head Hike", "Pearl Harbor Visit", "Hanauma Bay Snorkeling", "Waikiki Beach Morning", "Polynesian Cultural Center"],
+      afternoonActivities: ["North Shore Beaches", "Dole Plantation Tour", "Iolani Palace Visit", "Waimea Valley Hike", "Kualoa Ranch Tour"],
+      eveningActivities: ["Waikiki Sunset Viewing", "Luau Experience", "Kuhio Beach Torch Lighting", "Live Hawaiian Music", "Honolulu Night Market"],
+      restaurants: ["Duke's Waikiki", "Mama's Fish House", "Helena's Hawaiian Food", "Marukame Udon", "Ono Hawaiian Foods"],
+      dinnerSpots: ["Morio's Sushi Bistro", "Alan Wong's Restaurant", "Merriman's", "Roy's Waikiki", "House Without a Key"],
+      neighborhoods: ["Waikiki", "Kailua", "Lahaina", "North Shore", "Kapahulu"]
+    };
+  } 
+  else if (lowerDestination.includes("paris") || lowerDestination.includes("france")) {
+    return {
+      morningActivities: ["Eiffel Tower Visit", "Louvre Museum Tour", "Notre-Dame Cathedral", "Arc de Triomphe", "Montmartre Walk"],
+      afternoonActivities: ["Seine River Cruise", "Musée d'Orsay", "Luxembourg Gardens", "Champs-Élysées Shopping", "Palace of Versailles"],
+      eveningActivities: ["Moulin Rouge Show", "Paris Opera Performance", "Seine River Night Cruise", "Eiffel Tower Light Show", "Le Marais Nightlife"],
+      restaurants: ["Café de Flore", "Les Deux Magots", "L'As du Fallafel", "Bistrot Paul Bert", "Le Comptoir du Relais"],
+      dinnerSpots: ["Le Jules Verne", "Chez L'Ami Jean", "Septime", "Le Chateaubriand", "Brasserie Lipp"],
+      neighborhoods: ["Le Marais", "Saint-Germain-des-Prés", "Montmartre", "Latin Quarter", "Opera District"]
+    };
+  }
+  else if (lowerDestination.includes("new york") || lowerDestination.includes("nyc")) {
+    return {
+      morningActivities: ["Statue of Liberty Visit", "Central Park Walk", "Empire State Building", "Metropolitan Museum", "Brooklyn Bridge Walk"],
+      afternoonActivities: ["Times Square Exploration", "High Line Park", "Chelsea Market", "Museum of Modern Art", "Grand Central Terminal"],
+      eveningActivities: ["Broadway Show", "Jazz Club in Harlem", "Rooftop Bar Experience", "Greenwich Village Tour", "Comedy Club Show"],
+      restaurants: ["Katz's Delicatessen", "Peter Luger Steak House", "Russ & Daughters", "Lombardi's Pizza", "Shake Shack"],
+      dinnerSpots: ["Gramercy Tavern", "Le Bernardin", "Balthazar", "Carbone", "Keens Steakhouse"],
+      neighborhoods: ["Manhattan", "Brooklyn", "SoHo", "Upper East Side", "Lower East Side"]
+    };
+  }
+  else if (lowerDestination.includes("tokyo") || lowerDestination.includes("japan")) {
+    return {
+      morningActivities: ["Meiji Shrine", "Tsukiji Fish Market", "Senso-ji Temple", "Tokyo Skytree", "Imperial Palace Gardens"],
+      afternoonActivities: ["Harajuku Shopping", "Ueno Park", "Akihabara Electronics District", "Roppongi Hills", "Tokyo National Museum"],
+      eveningActivities: ["Robot Restaurant Show", "Izakaya Hopping in Shinjuku", "Tokyo Bay Cruise", "Karaoke in Shibuya", "Golden Gai Bars"],
+      restaurants: ["Ichiran Ramen", "Sushi Dai", "Tonkatsu Maisen", "Tempura Kondo", "Tsukiji Sushisay"],
+      dinnerSpots: ["Sukiyabashi Jiro", "Gonpachi", "Kyubey", "Ukai-tei", "Tapas Molecular Bar"],
+      neighborhoods: ["Shinjuku", "Shibuya", "Ginza", "Asakusa", "Roppongi"]
+    };
+  }
+  else if (lowerDestination.includes("london") || lowerDestination.includes("uk") || lowerDestination.includes("england")) {
+    return {
+      morningActivities: ["Tower of London", "British Museum", "Buckingham Palace", "Westminster Abbey", "St. Paul's Cathedral"],
+      afternoonActivities: ["London Eye", "Tate Modern", "Hyde Park", "Covent Garden", "National Gallery"],
+      eveningActivities: ["West End Show", "Shakespeare's Globe Theatre", "Soho Nightlife", "Jack the Ripper Tour", "River Thames Cruise"],
+      restaurants: ["Borough Market Eateries", "Dishoom", "The Ivy", "The Wolseley", "Gordon Ramsay Restaurant"],
+      dinnerSpots: ["Rules Restaurant", "Dinner by Heston Blumenthal", "Duck & Waffle", "Sketch", "The Ledbury"],
+      neighborhoods: ["Westminster", "Soho", "Notting Hill", "Kensington", "Camden"]
+    };
+  }
+  else if (lowerDestination.includes("rome") || lowerDestination.includes("italy")) {
+    return {
+      morningActivities: ["Colosseum Tour", "Vatican Museums", "Roman Forum", "Trevi Fountain", "Pantheon Visit"],
+      afternoonActivities: ["Spanish Steps", "Villa Borghese", "Piazza Navona", "Trastevere Walk", "Castel Sant'Angelo"],
+      eveningActivities: ["Opera at Teatro dell'Opera", "Campo de' Fiori Nightlife", "Trastevere Dining", "Tiber River Walk", "Piazza Navona at Night"],
+      restaurants: ["Da Enzo al 29", "Roscioli", "La Pergola", "Armando al Pantheon", "Pizzarium"],
+      dinnerSpots: ["Antica Pesa", "Il Pagliaccio", "La Pergola", "Glass Hostaria", "Ad Hoc"],
+      neighborhoods: ["Vatican", "Trastevere", "Monti", "Centro Storico", "Testaccio"]
+    };
+  }
+  // Return default if no specific destination match found
+  return defaultActivities;
 }
 
