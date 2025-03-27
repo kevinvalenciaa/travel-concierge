@@ -4,67 +4,254 @@ import { VoyentraAI } from '@/app/services/ai/voyentra-ai';
 // Create a singleton instance
 let voyentraAI: VoyentraAI | null = null;
 
-export async function POST(req: NextRequest) {
+// Update the Places API key to use the Gemini API key if no specific key is defined
+const GOOGLE_PLACES_API_KEY = process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || '';
+
+// Helper function to get activity details when API calls fail
+function getActivityDetails(activityName: string, destination: string, type: "attraction" | "restaurant" | "hotel" | "entertainment" | string) {
+  // City and country extraction
+  const cityName = destination.split(',')[0].trim();
+  const countryName = destination.split(',').length > 1 ? destination.split(',')[1].trim() : '';
+  
+  // Generate reasonable fallback details based on activity type
+  switch (type) {
+    case "restaurant":
+      return {
+        name: activityName,
+        address: `Near the center of ${cityName}`,
+        openingHours: ["11:00 - 22:00 (estimated)"],
+        phoneNumber: "Not available",
+        cuisine: `Local ${cityName} specialties${countryName ? ` and ${countryName} cuisine` : ''}`,
+        rating: "Not rated",
+        priceLevel: "€€",
+        website: "Not available"
+      };
+    case "attraction":
+      return {
+        name: activityName,
+        address: `${cityName} ${activityName.includes("Museum") ? "Cultural District" : "Tourist Area"}`,
+        openingHours: ["09:00 - 17:00 daily (estimated)"],
+        cost: "Admission fees may vary",
+        rating: "Not rated",
+        website: "Not available"
+      };
+    case "hotel":
+      return {
+        name: activityName,
+        address: `Central location in ${cityName}`,
+        phoneNumber: "Not available",
+        rating: "Not rated",
+        website: "Not available",
+        priceLevel: "€€"
+      };
+    case "entertainment":
+      return {
+        name: activityName,
+        address: `Entertainment district, ${cityName}`,
+        openingHours: ["18:00 - 00:00 (estimated)"],
+        cost: "Prices vary",
+        rating: "Not rated",
+        website: "Not available",
+        priceLevel: "€€"
+      };
+    default:
+      return {
+        name: activityName,
+        address: `${cityName} center`,
+        openingHours: ["Hours not available"],
+        rating: "Not rated",
+        website: "Not available"
+      };
+  }
+}
+
+// Helper function to fetch real-world place details from Google Places API
+async function fetchPlaceDetails(query: string, type: string, location: string) {
   try {
-    // Check if API key is present
-    if (!process.env.GOOGLE_GEMINI_API_KEY) {
-      console.error('Missing Gemini API key in environment variables');
-      return NextResponse.json(
-        { 
-          error: "Unable to access travel API. Please try again later." 
-        },
-        { status: 500 }
-      );
+    // First, let's try to find the place
+    const searchUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(query + ' ' + location)}&type=${type}&key=${GOOGLE_PLACES_API_KEY}`;
+    const searchResponse = await fetch(searchUrl);
+    const searchData = await searchResponse.json();
+    
+    if (!searchData.results || searchData.results.length === 0) {
+      return null;
     }
-
-    const body = await req.json();
-    const { destination, startDate, endDate, budget, travelers, travelerDemographics } = body;
-
-    if (!destination || !startDate || !endDate || !budget || !travelers) {
-      return NextResponse.json(
-        { 
-          error: "Missing required trip information." 
-        },
-        { status: 400 }
-      );
+    
+    // Get details for the top result
+    const placeId = searchData.results[0].place_id;
+    const detailsUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=name,formatted_address,formatted_phone_number,rating,website,opening_hours,price_level,photos&key=${GOOGLE_PLACES_API_KEY}`;
+    const detailsResponse = await fetch(detailsUrl);
+    const detailsData = await detailsResponse.json();
+    
+    if (!detailsData.result) {
+      return null;
     }
+    
+    return {
+      name: detailsData.result.name,
+      address: detailsData.result.formatted_address,
+      phoneNumber: detailsData.result.formatted_phone_number || 'Not available',
+      website: detailsData.result.website || 'Not available',
+      rating: detailsData.result.rating ? `${detailsData.result.rating}/5` : 'Not rated',
+      priceLevel: detailsData.result.price_level ? '€'.repeat(detailsData.result.price_level) : '€€',
+      openingHours: detailsData.result.opening_hours?.weekday_text || ['Hours not available'],
+      photoReference: detailsData.result.photos?.[0]?.photo_reference || null
+    };
+  } catch (error) {
+    console.error('Error fetching place details:', error);
+    return null;
+  }
+}
 
-    // Initialize the AI instance if it doesn't exist
-    if (!voyentraAI) {
+// Helper function to repair malformed JSON strings from AI responses
+function repairJsonString(aiResponse: string): string {
+  let jsonString = aiResponse;
+  
+  // If the response is wrapped in code blocks, extract just the JSON
+  const jsonMatch = aiResponse.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (jsonMatch && jsonMatch[1]) {
+    jsonString = jsonMatch[1];
+  } else {
+    // Try to find JSON object within the response
+    const objectMatch = aiResponse.match(/(\{[\s\S]*\})/);
+    if (objectMatch && objectMatch[1]) {
+      jsonString = objectMatch[1];
+    }
+  }
+  
+  // Clean the string
+  jsonString = jsonString.trim();
+  
+  // Replace single quotes with double quotes
+  jsonString = jsonString.replace(/'/g, '"');
+  
+  // Fix missing quotes around property names
+  jsonString = jsonString.replace(/([{,]\s*)(\w+)(\s*:)/g, '$1"$2"$3');
+  
+  // Fix trailing commas in arrays and objects
+  jsonString = jsonString.replace(/,(\s*[\]}])/g, '$1');
+  
+  // Fix missing commas between array items or object properties
+  jsonString = jsonString.replace(/}(\s*){/g, '},\n$1{');
+  jsonString = jsonString.replace(/](\s*)\[/g, '],\n$1[');
+  
+  return jsonString;
+}
+
+// Enhanced function to generate a fallback itinerary with real-world place lookup
+async function generateFallbackItinerary(destination: string, tripLength: number, interests: string) {
+  const days = [];
+  const cityName = destination.split(',')[0].trim();
+  
+  for (let day = 1; day <= tripLength; day++) {
+    const dailyActivities = [];
+    
+    // Morning activity - typically attraction or sightseeing
+    const morningActivityName = `${cityName} ${day === 1 ? "Historical Center" : day === 2 ? "Museum" : day === 3 ? "Park" : "Popular Attraction"}`;
+    const morningDetails = await fetchPlaceDetails(morningActivityName, 'tourist_attraction', destination);
+    
+    dailyActivities.push({
+      id: `${day}-1`,
+      time: "09:00",
+      title: morningDetails?.name || morningActivityName,
+      description: `Explore ${morningDetails?.name || morningActivityName} - ${morningDetails?.rating || 'a popular attraction'} in ${destination}`,
+      icon: "attraction",
+      priceRange: morningDetails?.priceLevel || "€€",
+      details: morningDetails || getActivityDetails(morningActivityName, destination, "attraction")
+    });
+    
+    // Lunch - restaurant
+    const lunchActivityName = `Best Restaurant in ${cityName}`;
+    const lunchDetails = await fetchPlaceDetails(lunchActivityName, 'restaurant', destination);
+    
+    dailyActivities.push({
+      id: `${day}-2`,
+      time: "13:00",
+      title: lunchDetails?.name || `Local Restaurant in ${cityName}`,
+      description: `Enjoy delicious cuisine at ${lunchDetails?.name || 'this local restaurant'} - ${lunchDetails?.rating || 'a popular dining spot'}`,
+      icon: "food",
+      priceRange: lunchDetails?.priceLevel || "€€",
+      details: lunchDetails || getActivityDetails(lunchActivityName, destination, "restaurant")
+    });
+    
+    // Afternoon activity
+    const afternoonType = day === 1 ? "hotel" : "entertainment";
+    const afternoonActivityName = day === 1 
+      ? `Best Hotel in ${cityName}` 
+      : `${interests || 'Popular'} activity in ${cityName}`;
+    const afternoonDetails = await fetchPlaceDetails(afternoonActivityName, day === 1 ? 'lodging' : 'tourist_attraction', destination);
+    
+    dailyActivities.push({
+      id: `${day}-3`,
+      time: day === 1 ? "15:00" : "16:00",
+      title: afternoonDetails?.name || (day === 1 ? `Hotel Check-in in ${cityName}` : `${cityName} Experience`),
+      description: day === 1 
+        ? `Check in and relax at ${afternoonDetails?.name || 'your hotel'} in ${destination}` 
+        : `Experience ${afternoonDetails?.name || 'local culture'} in ${destination}`,
+      icon: afternoonType,
+      priceRange: afternoonDetails?.priceLevel || "€€",
+      details: afternoonDetails || getActivityDetails(afternoonActivityName, destination, afternoonType)
+    });
+    
+    // Add dinner for days other than arrival and departure
+    if (day !== 1 && day !== tripLength) {
+      const dinnerActivityName = `Best Dinner Restaurant in ${cityName}`;
+      const dinnerDetails = await fetchPlaceDetails(dinnerActivityName, 'restaurant', destination);
+      
+      dailyActivities.push({
+        id: `${day}-4`,
+        time: "19:00",
+        title: dinnerDetails?.name || `Evening Dining in ${cityName}`,
+        description: `Enjoy dinner at ${dinnerDetails?.name || 'this restaurant'} - ${dinnerDetails?.rating || 'a great dinner option'} in ${destination}`,
+        icon: "food",
+        priceRange: dinnerDetails?.priceLevel || "€€€",
+        details: dinnerDetails || getActivityDetails(dinnerActivityName, destination, "restaurant")
+      });
+    }
+    
+    days.push({
+      day,
+      activities: dailyActivities
+    });
+  }
+  
+  return {
+    itinerary: days
+  };
+}
+
+export async function POST(req: NextRequest) {
+  const body = await req.json();
+  const { destination, startDate, endDate, budget, travelers, tripType, interests } = body;
+
+  if (!destination) {
+    return NextResponse.json({ error: "Destination is required" }, { status: 400 });
+  }
+
+  // Calculate number of days
+  const start = startDate ? new Date(startDate) : new Date();
+  const end = endDate ? new Date(endDate) : new Date(start);
+  end.setDate(start.getDate() + 5); // default to 5 days if no end date
+  const numberOfDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+
+  // Initialize Gemini AI if not already initialized
+  if (!voyentraAI) {
+    voyentraAI = new VoyentraAI();
+  }
+
+  let itineraryData = null;
+  let attemptCount = 0;
+  const maxAttempts = 2;
+  let lastError = null;
+
+  try {
+    // Start with AI-generated itinerary
+    while (attemptCount < maxAttempts) {
       try {
-        console.log('Initializing VoyentraAI instance for itinerary generation...');
-        voyentraAI = new VoyentraAI();
-        console.log('VoyentraAI instance created successfully');
-      } catch (initError) {
-        console.error('Failed to initialize VoyentraAI:', initError);
-        return NextResponse.json(
-          { 
-            error: "Failed to initialize travel planner." 
-          },
-          { status: 500 }
-        );
-      }
-    }
-
-    // Calculate number of days
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    const tripDuration = Math.round((end.getTime() - start.getTime()) / (1000 * 3600 * 24)) + 1;
+        console.log(`Sending itinerary request to AI... (Attempt ${attemptCount + 1})`);
+        const prompt = `Create a personalized detailed travel itinerary for a ${numberOfDays}-day trip to ${destination} for ${travelers} travelers with a budget of $${budget}. 
     
-    // Format date range for prompt
-    const dateRange = `${start.toLocaleDateString('en-US', { 
-      month: 'short', 
-      day: 'numeric' 
-    })} - ${end.toLocaleDateString('en-US', { 
-      month: 'short', 
-      day: 'numeric', 
-      year: 'numeric' 
-    })}`;
-
-    // Create the AI prompt
-    const prompt = `Create a personalized detailed travel itinerary for a ${tripDuration}-day trip to ${destination} for ${travelers} travelers with a budget of $${budget}. 
-    
-    Traveler information: ${travelerDemographics || "General travelers"}
+    Traveler information: ${tripType || 'General vacation'} ${interests ? `with interests in ${interests}` : ''}
     
     Your task:
     - Create a realistic, day-by-day itinerary with specific activities and dining options unique to ${destination}
@@ -83,6 +270,8 @@ export async function POST(req: NextRequest) {
     - Provide specific descriptions that mention actual attractions and dining experiences
     - Ensure activities make geographical sense (don't schedule activities far apart on same day)
     - Each activity should have a specific title that clearly indicates what it is
+    - For less common destinations, BE ESPECIALLY THOROUGH in researching and providing authentic, specific attractions and restaurants
+    - If you're unfamiliar with the destination, use your knowledge to provide realistic, plausible, and specific activities that would likely exist there
     
     Format your response as a JSON object with this structure:
     {
@@ -107,235 +296,73 @@ export async function POST(req: NextRequest) {
     
     ONLY output valid JSON! Do not include any text before or after the JSON. Each day should have 3-5 activities.`;
 
-    console.log('Sending itinerary request to AI...');
-    const aiResponse = await voyentraAI.sendMessage(prompt);
-    console.log('Received AI response for itinerary');
-    
-    try {
-      // Try to extract JSON from the response
-      let jsonString = aiResponse;
-      
-      // If there's text before or after the JSON, extract just the JSON part
-      const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        jsonString = jsonMatch[0];
+        console.log("Sending message to Gemini:", prompt);
+        
+        const aiResponse = await voyentraAI.sendMessage(prompt);
+        console.log("Received AI response for itinerary");
+        
+        try {
+          itineraryData = JSON.parse(aiResponse);
+        } catch (parseError) {
+          console.log("Failed first JSON parse attempt, trying to fix JSON string");
+          
+          // Try to clean and repair the JSON
+          const jsonString = repairJsonString(aiResponse);
+          
+          // Try to parse again
+          itineraryData = JSON.parse(jsonString);
+        }
+        
+        // Make sure the data has the expected structure
+        if (!itineraryData || !itineraryData.itinerary || itineraryData.itinerary.length === 0) {
+          throw new Error("Invalid itinerary data structure");
+        }
+        
+        // Successfully got itinerary data
+        break;
+      } catch (error) {
+        lastError = error;
+        console.log(`Error on attempt ${attemptCount + 1}:`, error);
+        attemptCount++;
+        
+        // Wait briefly before trying again
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
-      
-      // Clean the string (sometimes AI adds extra characters)
-      jsonString = jsonString.trim();
-      
-      // Try to parse the JSON
-      let itineraryData;
-      try {
-        itineraryData = JSON.parse(jsonString);
-      } catch (initialParseError) {
-        // If parsing fails, try to fix common JSON issues and try again
-        console.error('Failed first JSON parse attempt, trying to fix JSON string');
-        
-        // Replace single quotes with double quotes
-        jsonString = jsonString.replace(/'/g, '"');
-        
-        // Try to find and fix missing quotes around property names
-        jsonString = jsonString.replace(/([{,]\s*)(\w+)(\s*:)/g, '$1"$2"$3');
-        
-        // Try to parse again
-        itineraryData = JSON.parse(jsonString);
-      }
-      
-      // Make sure the data has the expected structure
-      if (!itineraryData || !itineraryData.itinerary || !Array.isArray(itineraryData.itinerary)) {
-        // If itinerary is missing, create a basic structure
-        console.error('Parsed JSON but missing correct structure');
-        
-        // Create a fallback itinerary with basic information
-        itineraryData = {
-          itinerary: generateFallbackItinerary(tripDuration, destination)
-        };
-      }
-      
-      return NextResponse.json(itineraryData);
-    } catch (parseError) {
-      console.error('Error parsing AI response:', parseError);
-      console.error('AI response was:', aiResponse);
-      
-      // Create a fallback itinerary instead of just returning an error
-      const fallbackItinerary = {
-        itinerary: generateFallbackItinerary(tripDuration, destination)
-      };
-      
-      return NextResponse.json(fallbackItinerary);
     }
+    
+    // If all AI attempts failed, generate a fallback itinerary with real-world data
+    if (!itineraryData || !itineraryData.itinerary || itineraryData.itinerary.length === 0) {
+      console.log('All AI generation attempts failed, generating fallback with real-world data');
+      itineraryData = await generateFallbackItinerary(destination, numberOfDays, interests || '');
+    }
+    
+    return NextResponse.json({
+      success: true,
+      itinerary: itineraryData.itinerary,
+      usingFallback: attemptCount >= maxAttempts
+    });
   } catch (error) {
-    console.error('Itinerary API Error:', error);
-    return NextResponse.json(
-      { 
-        error: "An error occurred while generating your itinerary." 
-      },
-      { status: 500 }
-    );
-  }
-}
-
-// Function to generate a basic fallback itinerary if AI fails
-function generateFallbackItinerary(days: number, destination: string) {
-  const itinerary = [];
-  
-  // Get destination-specific activities based on common tourist attractions
-  const destinationAttractions = getDestinationActivities(destination);
-  
-  for (let day = 1; day <= days; day++) {
-    const activities = [];
+    console.error("Error generating itinerary:", error);
     
-    // Morning activity
-    activities.push({
-      id: `${day}-1`,
-      icon: "attraction",
-      time: "09:00",
-      title: destinationAttractions.morningActivities[day % destinationAttractions.morningActivities.length],
-      description: `Explore this famous attraction in ${destination}`,
-      priceRange: "€€"
-    });
-    
-    // Lunch
-    activities.push({
-      id: `${day}-2`,
-      icon: "food",
-      time: "13:00",
-      title: destinationAttractions.restaurants[day % destinationAttractions.restaurants.length],
-      description: `Enjoy delicious local cuisine in ${destination}`,
-      priceRange: "€€"
-    });
-    
-    // Afternoon activity or hotel check-in on first day
-    if (day === 1) {
-      activities.push({
-        id: `${day}-3`,
-        icon: "hotel",
-        time: "15:00",
-        title: "Hotel Check-in",
-        description: `Check in to your accommodation in ${destinationAttractions.neighborhoods[0]}`,
-        priceRange: "€€€"
-      });
-    } else {
-      activities.push({
-        id: `${day}-3`,
-        icon: "attraction",
-        time: "15:00",
-        title: destinationAttractions.afternoonActivities[(day - 1) % destinationAttractions.afternoonActivities.length],
-        description: `Experience this popular attraction in ${destination}`,
-        priceRange: "€€"
-      });
-    }
-    
-    // Dinner - not on last day
-    if (day !== days) {
-      activities.push({
-        id: `${day}-4`,
-        icon: "food",
-        time: "19:00",
-        title: destinationAttractions.dinnerSpots[day % destinationAttractions.dinnerSpots.length],
-        description: `Dinner at this well-known restaurant in ${destination}`,
-        priceRange: "€€"
-      });
+    // If an error occurs, still try to provide a fallback itinerary with real data
+    console.log('Error occurred, generating fallback with real-world data');
+    try {
+      itineraryData = await generateFallbackItinerary(destination, numberOfDays, interests || '');
       
-      // Evening activity - not on first or last day
-      if (day !== 1) {
-        activities.push({
-          id: `${day}-5`,
-          icon: "entertainment",
-          time: "21:00",
-          title: destinationAttractions.eveningActivities[(day - 1) % destinationAttractions.eveningActivities.length],
-          description: `Experience the nightlife and entertainment in ${destination}`,
-          priceRange: "€€"
-        });
-      }
+      return NextResponse.json({
+        success: true,
+        itinerary: itineraryData.itinerary,
+        usingFallback: true,
+        error: `AI generation failed after ${attemptCount} attempts. Using fallback data.`
+      });
+    } catch (fallbackError) {
+      return NextResponse.json(
+        { 
+          error: "Failed to generate itinerary after multiple attempts. Please try again later.",
+          details: lastError ? String(lastError) : null
+        }, 
+        { status: 500 }
+      );
     }
-    
-    itinerary.push({
-      day: day,
-      activities: activities
-    });
   }
-  
-  return itinerary;
-}
-
-// Helper function to provide destination-specific activities
-function getDestinationActivities(destination: string) {
-  // Default activities for any destination
-  const defaultActivities = {
-    morningActivities: ["City Tour", "Museum Visit", "Local Market Tour"],
-    afternoonActivities: ["Historical District Tour", "Cultural Experience", "Shopping District"],
-    eveningActivities: ["Cultural Show", "Local Music Venue", "Sunset Cruise"],
-    restaurants: ["Local Cuisine Restaurant", "Popular Eatery", "Traditional Dining Experience"],
-    dinnerSpots: ["Highly-Rated Restaurant", "Authentic Local Dining", "Scenic Dinner Spot"],
-    neighborhoods: ["Downtown", "Tourist District", "Popular Area"]
-  };
-
-  // Lowercase the destination for easier matching
-  const lowerDestination = destination.toLowerCase();
-  
-  // Destination-specific activities
-  if (lowerDestination.includes("hawaii") || lowerDestination.includes("honolulu") || lowerDestination.includes("maui")) {
-    return {
-      morningActivities: ["Diamond Head Hike", "Pearl Harbor Visit", "Hanauma Bay Snorkeling", "Waikiki Beach Morning", "Polynesian Cultural Center"],
-      afternoonActivities: ["North Shore Beaches", "Dole Plantation Tour", "Iolani Palace Visit", "Waimea Valley Hike", "Kualoa Ranch Tour"],
-      eveningActivities: ["Waikiki Sunset Viewing", "Luau Experience", "Kuhio Beach Torch Lighting", "Live Hawaiian Music", "Honolulu Night Market"],
-      restaurants: ["Duke's Waikiki", "Mama's Fish House", "Helena's Hawaiian Food", "Marukame Udon", "Ono Hawaiian Foods"],
-      dinnerSpots: ["Morio's Sushi Bistro", "Alan Wong's Restaurant", "Merriman's", "Roy's Waikiki", "House Without a Key"],
-      neighborhoods: ["Waikiki", "Kailua", "Lahaina", "North Shore", "Kapahulu"]
-    };
-  } 
-  else if (lowerDestination.includes("paris") || lowerDestination.includes("france")) {
-    return {
-      morningActivities: ["Eiffel Tower Visit", "Louvre Museum Tour", "Notre-Dame Cathedral", "Arc de Triomphe", "Montmartre Walk"],
-      afternoonActivities: ["Seine River Cruise", "Musée d'Orsay", "Luxembourg Gardens", "Champs-Élysées Shopping", "Palace of Versailles"],
-      eveningActivities: ["Moulin Rouge Show", "Paris Opera Performance", "Seine River Night Cruise", "Eiffel Tower Light Show", "Le Marais Nightlife"],
-      restaurants: ["Café de Flore", "Les Deux Magots", "L'As du Fallafel", "Bistrot Paul Bert", "Le Comptoir du Relais"],
-      dinnerSpots: ["Le Jules Verne", "Chez L'Ami Jean", "Septime", "Le Chateaubriand", "Brasserie Lipp"],
-      neighborhoods: ["Le Marais", "Saint-Germain-des-Prés", "Montmartre", "Latin Quarter", "Opera District"]
-    };
-  }
-  else if (lowerDestination.includes("new york") || lowerDestination.includes("nyc")) {
-    return {
-      morningActivities: ["Statue of Liberty Visit", "Central Park Walk", "Empire State Building", "Metropolitan Museum", "Brooklyn Bridge Walk"],
-      afternoonActivities: ["Times Square Exploration", "High Line Park", "Chelsea Market", "Museum of Modern Art", "Grand Central Terminal"],
-      eveningActivities: ["Broadway Show", "Jazz Club in Harlem", "Rooftop Bar Experience", "Greenwich Village Tour", "Comedy Club Show"],
-      restaurants: ["Katz's Delicatessen", "Peter Luger Steak House", "Russ & Daughters", "Lombardi's Pizza", "Shake Shack"],
-      dinnerSpots: ["Gramercy Tavern", "Le Bernardin", "Balthazar", "Carbone", "Keens Steakhouse"],
-      neighborhoods: ["Manhattan", "Brooklyn", "SoHo", "Upper East Side", "Lower East Side"]
-    };
-  }
-  else if (lowerDestination.includes("tokyo") || lowerDestination.includes("japan")) {
-    return {
-      morningActivities: ["Meiji Shrine", "Tsukiji Fish Market", "Senso-ji Temple", "Tokyo Skytree", "Imperial Palace Gardens"],
-      afternoonActivities: ["Harajuku Shopping", "Ueno Park", "Akihabara Electronics District", "Roppongi Hills", "Tokyo National Museum"],
-      eveningActivities: ["Robot Restaurant Show", "Izakaya Hopping in Shinjuku", "Tokyo Bay Cruise", "Karaoke in Shibuya", "Golden Gai Bars"],
-      restaurants: ["Ichiran Ramen", "Sushi Dai", "Tonkatsu Maisen", "Tempura Kondo", "Tsukiji Sushisay"],
-      dinnerSpots: ["Sukiyabashi Jiro", "Gonpachi", "Kyubey", "Ukai-tei", "Tapas Molecular Bar"],
-      neighborhoods: ["Shinjuku", "Shibuya", "Ginza", "Asakusa", "Roppongi"]
-    };
-  }
-  else if (lowerDestination.includes("london") || lowerDestination.includes("uk") || lowerDestination.includes("england")) {
-    return {
-      morningActivities: ["Tower of London", "British Museum", "Buckingham Palace", "Westminster Abbey", "St. Paul's Cathedral"],
-      afternoonActivities: ["London Eye", "Tate Modern", "Hyde Park", "Covent Garden", "National Gallery"],
-      eveningActivities: ["West End Show", "Shakespeare's Globe Theatre", "Soho Nightlife", "Jack the Ripper Tour", "River Thames Cruise"],
-      restaurants: ["Borough Market Eateries", "Dishoom", "The Ivy", "The Wolseley", "Gordon Ramsay Restaurant"],
-      dinnerSpots: ["Rules Restaurant", "Dinner by Heston Blumenthal", "Duck & Waffle", "Sketch", "The Ledbury"],
-      neighborhoods: ["Westminster", "Soho", "Notting Hill", "Kensington", "Camden"]
-    };
-  }
-  else if (lowerDestination.includes("rome") || lowerDestination.includes("italy")) {
-    return {
-      morningActivities: ["Colosseum Tour", "Vatican Museums", "Roman Forum", "Trevi Fountain", "Pantheon Visit"],
-      afternoonActivities: ["Spanish Steps", "Villa Borghese", "Piazza Navona", "Trastevere Walk", "Castel Sant'Angelo"],
-      eveningActivities: ["Opera at Teatro dell'Opera", "Campo de' Fiori Nightlife", "Trastevere Dining", "Tiber River Walk", "Piazza Navona at Night"],
-      restaurants: ["Da Enzo al 29", "Roscioli", "La Pergola", "Armando al Pantheon", "Pizzarium"],
-      dinnerSpots: ["Antica Pesa", "Il Pagliaccio", "La Pergola", "Glass Hostaria", "Ad Hoc"],
-      neighborhoods: ["Vatican", "Trastevere", "Monti", "Centro Storico", "Testaccio"]
-    };
-  }
-  // Return default if no specific destination match found
-  return defaultActivities;
 } 
