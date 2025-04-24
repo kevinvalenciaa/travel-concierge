@@ -90,8 +90,8 @@ export default function DashboardPage() {
   const { trips } = useTrips()
   const upcomingTrips = trips.upcoming
   const { toast } = useToast()
-  const { profile } = useProfile()
-  const firstName = profile.name.split(" ")[0]
+  const { name } = useProfile()
+  const firstName = name ? name.split(" ")[0] : "User"
 
   return (
     <div className="flex-1 space-y-8 p-8 pt-6">

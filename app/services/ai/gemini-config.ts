@@ -28,4 +28,5 @@ const safetySettings = [
 
 // Initialize the Generative AI client with API key
 console.log('Initializing Google Generative AI client...');
+// The API version is determined by the SDK version
 export const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY); 
