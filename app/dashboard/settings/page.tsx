@@ -10,13 +10,14 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
-import { BeanIcon as Beach, Mountain, Building, Landmark, Utensils, SpadeIcon as Spa } from "lucide-react"
+import { BeanIcon as Beach, Mountain, Building, Landmark, Utensils, SpadeIcon as Spa, LogOut } from "lucide-react"
 import { WorldMap } from "@/components/profile/world-map"
 import { useProfile } from "@/contexts/profile-context"
 import { useToast } from "@/components/ui/use-toast"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { UploadAvatarButton } from "@/components/upload-avatar-button"
 import { useTheme } from "next-themes"
+import { useAuth } from "@/contexts/auth-context"
 
 const currencies = [
   { label: "USD - US Dollar", value: "USD" },
@@ -38,6 +39,7 @@ export default function SettingsPage() {
   })
 
   const { profile, updateProfile } = useProfile()
+  const { signOut } = useAuth()
   const { toast } = useToast()
   const [isEditing, setIsEditing] = useState(false)
   const { theme, setTheme } = useTheme()
@@ -75,6 +77,12 @@ export default function SettingsPage() {
     { id: "food", icon: Utensils, label: "Food & Culinary" },
     { id: "wellness", icon: Spa, label: "Relaxation & Wellness" },
   ]
+
+  // Handle log out
+  const handleLogOut = async () => {
+    await signOut()
+    // Redirect will be handled by the signOut function
+  }
 
   return (
     <div className="space-y-6 p-6 pb-16">
@@ -282,9 +290,15 @@ export default function SettingsPage() {
                 <Separator />
                 <div className="space-y-2">
                   <Label className="text-red-500">Danger Zone</Label>
-                  <Button variant="destructive" className="w-full">
-                    Delete Account
-                  </Button>
+                  <div className="flex flex-col space-y-2 md:flex-row md:space-y-0 md:space-x-2">
+                    <Button variant="outline" className="flex items-center" onClick={handleLogOut}>
+                      <LogOut className="mr-2 h-4 w-4" />
+                      Log Out
+                    </Button>
+                    <Button variant="destructive" className="flex-1">
+                      Delete Account
+                    </Button>
+                  </div>
                 </div>
               </div>
             </CardContent>

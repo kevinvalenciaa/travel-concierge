@@ -25,14 +25,14 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const { user, loading } = useAuth()
   const router = useRouter()
 
-  // Ensure only authenticated users can access the dashboard
+  // Strong protection - immediately redirect if not authenticated
   useEffect(() => {
     if (!loading && !user) {
       router.push("/sign-in")
     }
   }, [loading, user, router])
 
-  // Show loading state while checking authentication
+  // Don't render anything until we know authentication status
   if (loading) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center">
@@ -49,9 +49,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     )
   }
 
-  // Don't render dashboard if user is not authenticated
+  // Absolutely no access to dashboard without authentication
   if (!user) {
-    return null
+    return null // Don't render anything for unauthorized users
   }
 
   return (
