@@ -60,7 +60,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
         
         // Handle sign in event
-        if (event === 'SIGNED_IN') {
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
           // Create or update user profile in database
           if (session?.user) {
             const { error } = await supabase
@@ -76,6 +76,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if (error) {
               console.error('Error updating profile:', error)
             }
+            
+            // Redirect to dashboard if user just signed in
+            if (event === 'SIGNED_IN' && (pathname === '/sign-in' || pathname === '/sign-up')) {
+              router.push('/dashboard')
+            }
           }
         }
       }
@@ -85,23 +90,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       subscription.unsubscribe()
     }
-  }, [router, supabase])
+  }, [router, supabase, pathname])
 
   // Custom hook to protect routes
   useEffect(() => {
     // Paths that don't require authentication
-    const publicPaths = ['/sign-in', '/sign-up', '/password-reset']
+    const publicPaths = ['/', '/sign-in', '/sign-up', '/password-reset']
     const isPublicPath = publicPaths.includes(pathname)
 
     // Check if the user needs to be redirected
     if (!loading) {
       // Redirect to dashboard if signed in and on a public path
-      if (user && isPublicPath) {
+      if (user && isPublicPath && pathname !== '/') {
         router.push('/dashboard')
       }
       
       // Redirect to sign-in if not signed in and on a private path
-      if (!user && !isPublicPath && pathname !== '/') {
+      if (!user && !isPublicPath) {
         router.push('/sign-in')
       }
     }

@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
@@ -17,8 +17,15 @@ export default function SignInPage() {
   const [password, setPassword] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState("")
-  const { signIn } = useAuth()
+  const { signIn, user } = useAuth()
   const router = useRouter()
+  
+  // Redirect to dashboard if user is already signed in
+  useEffect(() => {
+    if (user) {
+      router.push("/dashboard")
+    }
+  }, [user, router])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -30,9 +37,8 @@ export default function SignInPage() {
       
       if (signInError) {
         setError(signInError.message || "Failed to sign in. Please check your credentials.")
-      } else {
-        router.push("/dashboard")
       }
+      // No need for else block with router.push as the auth context will handle the redirect
     } catch (error: any) {
       setError(error.message || "An unexpected error occurred")
       console.error(error)

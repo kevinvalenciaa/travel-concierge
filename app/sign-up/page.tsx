@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
@@ -20,8 +20,15 @@ export default function SignUpPage() {
   const [passwordError, setPasswordError] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [generalError, setGeneralError] = useState("")
-  const { signUp } = useAuth()
+  const { signUp, user } = useAuth()
   const router = useRouter()
+  
+  // Redirect to dashboard if user is already signed in
+  useEffect(() => {
+    if (user) {
+      router.push("/dashboard")
+    }
+  }, [user, router])
 
   const validateForm = () => {
     setPasswordError("")
@@ -57,9 +64,8 @@ export default function SignUpPage() {
         } else {
           setGeneralError(error.message || "Failed to sign up. Please try again.")
         }
-      } else if (user) {
-        router.push("/dashboard")
       }
+      // No need for else block with router.push as the auth context will handle the redirect
     } catch (error: any) {
       setGeneralError(error.message || "An unexpected error occurred")
       console.error(error)

@@ -2,43 +2,9 @@
 
 import type React from "react"
 
-import { createContext, useContext, useState } from "react"
-
-interface Activity {
-  id: string
-  icon: "hotel" | "food" | "attraction" | "sunset" | "entertainment" | "nightlife"
-  time: string
-  title: string
-  description: string
-  priceRange?: string
-}
-
-interface DaySchedule {
-  day: number
-  activities: Activity[]
-}
-
-interface Trip {
-  id: number
-  destination: string
-  image: string
-  dates: string
-  status: string
-  activities: number
-  budget?: number
-  bookings: {
-    flight: string
-    hotel: string
-  }
-  flight?: {
-    departure: string
-    arrival: string
-    from: string
-    to: string
-    duration: string
-  }
-  itinerary: DaySchedule[]
-}
+import { createContext, useContext, useState, useEffect } from "react"
+import { getUserTrips, createTrip as createTripService, updateTrip as updateTripService, deleteTrip as deleteTripService, updateTripItinerary as updateTripItineraryService } from "@/app/services/trips"
+import { Trip, DaySchedule } from "@/types/trips"
 
 interface TripsContextType {
   trips: {
@@ -46,204 +12,136 @@ interface TripsContextType {
     past: Trip[]
     drafts: Trip[]
   }
-  deleteTrip: (tripId: number) => void
-  addTrip: (trip: Omit<Trip, "id">) => void
-  updateTripItinerary: (tripId: number, itinerary: DaySchedule[]) => void
-  updateTrip: (tripId: number, updatedTrip: Trip) => void
+  loading: boolean
+  deleteTrip: (tripId: string) => Promise<void>
+  addTrip: (trip: Omit<Trip, "id">) => Promise<Trip | null>
+  updateTripItinerary: (tripId: string, itinerary: DaySchedule[]) => Promise<void>
+  updateTrip: (tripId: string, updatedTrip: Trip) => Promise<Trip | null>
 }
 
 const TripsContext = createContext<TripsContextType | undefined>(undefined)
 
 export function TripsProvider({ children }: { children: React.ReactNode }) {
   const [trips, setTrips] = useState<TripsContextType["trips"]>({
-    upcoming: [
-      {
-        id: 1,
-        destination: "Paris, France",
-        image: "/placeholder.svg?height=200&width=300",
-        dates: "Feb 15 - Feb 22, 2024",
-        status: "Confirmed",
-        activities: 8,
-        budget: 2500,
-        bookings: {
-          flight: "Booked",
-          hotel: "Booked",
-        },
-        flight: {
-          departure: "2024-02-15T10:00",
-          arrival: "2024-02-15T12:00",
-          from: "JFK",
-          to: "CDG",
-          duration: "7h",
-        },
-        itinerary: [
-          {
-            day: 1,
-            activities: [
-              {
-                id: "1-1",
-                icon: "hotel",
-                time: "14:00",
-                title: "Check-in at The Ritz Paris",
-                description: "Luxury accommodation in the heart of Paris",
-                priceRange: "€€€€",
-              },
-              {
-                id: "1-2",
-                icon: "attraction",
-                time: "16:00",
-                title: "Eiffel Tower Visit",
-                description: "Skip-the-line guided tour with summit access",
-                priceRange: "€€",
-              },
-              {
-                id: "1-3",
-                icon: "food",
-                time: "20:00",
-                title: "Dinner at L'Arpège",
-                description: "Three Michelin-starred dining experience",
-                priceRange: "€€€€",
-              },
-            ],
-          },
-          {
-            day: 2,
-            activities: [
-              {
-                id: "2-1",
-                icon: "attraction",
-                time: "09:00",
-                title: "Louvre Museum",
-                description: "Private guided tour of the world's largest art museum",
-                priceRange: "€€",
-              },
-              {
-                id: "2-2",
-                icon: "food",
-                time: "13:00",
-                title: "Le Marais Food Tour",
-                description: "Culinary walking tour through historic Le Marais",
-                priceRange: "€€",
-              },
-              {
-                id: "2-3",
-                icon: "sunset",
-                time: "19:00",
-                title: "Seine River Cruise",
-                description: "Sunset dinner cruise along the Seine",
-                priceRange: "€€€",
-              },
-            ],
-          },
-        ],
-      },
-      {
-        id: 2,
-        destination: "Tokyo, Japan",
-        image: "/placeholder.svg?height=200&width=300",
-        dates: "Mar 10 - Mar 24, 2024",
-        status: "Planning",
-        activities: 4,
-        bookings: {
-          flight: "Not Booked",
-          hotel: "Not Booked",
-        },
-        itinerary: [
-          {
-            day: 1,
-            activities: [
-              {
-                id: "1-1",
-                icon: "hotel",
-                time: "15:00",
-                title: "Check-in at Park Hyatt Tokyo",
-                description: "Luxury hotel in Shinjuku",
-                priceRange: "€€€€",
-              },
-              {
-                id: "1-2",
-                icon: "food",
-                time: "19:00",
-                title: "Sushi Experience",
-                description: "Traditional Omakase dinner",
-                priceRange: "€€€",
-              },
-            ],
-          },
-        ],
-      },
-    ],
-    past: [
-      {
-        id: 3,
-        destination: "Rome, Italy",
-        image: "/placeholder.svg?height=200&width=300",
-        dates: "Oct 5 - Oct 12, 2023",
-        status: "Completed",
-        activities: 10,
-        bookings: {
-          flight: "Completed",
-          hotel: "Completed",
-        },
-        itinerary: [],
-      },
-    ],
-    drafts: [
-      {
-        id: 4,
-        destination: "Barcelona, Spain",
-        image: "/placeholder.svg?height=200&width=300",
-        dates: "Not set",
-        status: "Draft",
-        activities: 0,
-        bookings: {
-          flight: "Not Booked",
-          hotel: "Not Booked",
-        },
-        itinerary: [],
-      },
-    ],
+    upcoming: [],
+    past: [],
+    drafts: []
   })
+  const [loading, setLoading] = useState(true)
 
-  const deleteTrip = (tripId: number) => {
-    setTrips((prevTrips) => ({
-      upcoming: prevTrips.upcoming.filter((trip) => trip.id !== tripId),
-      past: prevTrips.past.filter((trip) => trip.id !== tripId),
-      drafts: prevTrips.drafts.filter((trip) => trip.id !== tripId),
-    }))
+  // Load user trips on mount and when auth state changes
+  useEffect(() => {
+    const loadTrips = async () => {
+      setLoading(true)
+      try {
+        const userTrips = await getUserTrips()
+        setTrips(userTrips)
+      } catch (error) {
+        console.error("Error loading trips", error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadTrips()
+  }, [])
+
+  const deleteTrip = async (tripId: string) => {
+    const { error } = await deleteTripService(tripId)
+    if (!error) {
+      setTrips((prevTrips) => ({
+        upcoming: prevTrips.upcoming.filter((trip) => trip.id !== tripId),
+        past: prevTrips.past.filter((trip) => trip.id !== tripId),
+        drafts: prevTrips.drafts.filter((trip) => trip.id !== tripId),
+      }))
+    }
   }
 
-  const addTrip = (trip: Omit<Trip, "id">) => {
-    setTrips((prevTrips) => ({
-      ...prevTrips,
-      upcoming: [
-        ...prevTrips.upcoming,
-        {
-          ...trip,
-          id: Math.max(...prevTrips.upcoming.map((t) => t.id), 0) + 1,
-        },
-      ],
-    }))
+  const addTrip = async (trip: Omit<Trip, "id">): Promise<Trip | null> => {
+    const { trip: newTrip, error } = await createTripService(trip)
+    if (newTrip && !error) {
+      setTrips((prevTrips) => {
+        // Determine which category to add to
+        const category = ['confirmed', 'planning'].includes(newTrip.status) 
+          ? 'upcoming' 
+          : newTrip.status === 'completed' 
+            ? 'past' 
+            : 'drafts'
+        
+        return {
+          ...prevTrips,
+          [category]: [newTrip, ...prevTrips[category as keyof typeof prevTrips]]
+        }
+      })
+      return newTrip
+    }
+    return null
   }
 
-  const updateTripItinerary = (tripId: number, newItinerary: DaySchedule[]) => {
-    setTrips((prevTrips) => ({
-      upcoming: prevTrips.upcoming.map((trip) => (trip.id === tripId ? { ...trip, itinerary: newItinerary } : trip)),
-      past: prevTrips.past.map((trip) => (trip.id === tripId ? { ...trip, itinerary: newItinerary } : trip)),
-      drafts: prevTrips.drafts.map((trip) => (trip.id === tripId ? { ...trip, itinerary: newItinerary } : trip)),
-    }))
+  const updateTripItinerary = async (tripId: string, newItinerary: DaySchedule[]) => {
+    const { error } = await updateTripItineraryService(tripId, newItinerary)
+    
+    if (!error) {
+      setTrips((prevTrips) => {
+        // Update in all categories
+        const updatedTrips = { ...prevTrips }
+        
+        // Helper to update trip in a category
+        const updateInCategory = (category: keyof typeof updatedTrips) => {
+          updatedTrips[category] = updatedTrips[category].map((trip) => 
+            trip.id === tripId 
+              ? { 
+                  ...trip, 
+                  itinerary: newItinerary,
+                  activities: newItinerary.reduce((count, day) => count + day.activities.length, 0)
+                } 
+              : trip
+          )
+        }
+        
+        // Update in all categories
+        updateInCategory('upcoming')
+        updateInCategory('past')
+        updateInCategory('drafts')
+        
+        return updatedTrips
+      })
+    }
   }
 
-  const updateTrip = (tripId: number, updatedTrip: Trip) => {
-    setTrips((prevTrips) => ({
-      upcoming: prevTrips.upcoming.map((trip) => (trip.id === tripId ? updatedTrip : trip)),
-      past: prevTrips.past.map((trip) => (trip.id === tripId ? updatedTrip : trip)),
-      drafts: prevTrips.drafts.map((trip) => (trip.id === tripId ? updatedTrip : trip)),
-    }))
+  const updateTrip = async (tripId: string, updatedTrip: Trip): Promise<Trip | null> => {
+    const { trip: resultTrip, error } = await updateTripService(tripId, updatedTrip)
+    
+    if (resultTrip && !error) {
+      setTrips((prevTrips) => {
+        // Remove from all categories
+        const withoutTrip = {
+          upcoming: prevTrips.upcoming.filter((trip) => trip.id !== tripId),
+          past: prevTrips.past.filter((trip) => trip.id !== tripId),
+          drafts: prevTrips.drafts.filter((trip) => trip.id !== tripId),
+        }
+        
+        // Add to the appropriate category
+        const category = ['confirmed', 'planning'].includes(resultTrip.status) 
+          ? 'upcoming' 
+          : resultTrip.status === 'completed' 
+            ? 'past' 
+            : 'drafts'
+        
+        return {
+          ...withoutTrip,
+          [category]: [resultTrip, ...withoutTrip[category as keyof typeof withoutTrip]]
+        }
+      })
+      
+      return resultTrip
+    }
+    
+    return null
   }
 
   return (
-    <TripsContext.Provider value={{ trips, deleteTrip, addTrip, updateTripItinerary, updateTrip }}>
+    <TripsContext.Provider value={{ trips, loading, deleteTrip, addTrip, updateTripItinerary, updateTrip }}>
       {children}
     </TripsContext.Provider>
   )

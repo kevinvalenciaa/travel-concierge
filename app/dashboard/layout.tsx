@@ -1,3 +1,5 @@
+"use client"
+
 import { SidebarNav } from "@/components/dashboard/sidebar-nav"
 import { MobileNav } from "@/components/dashboard/mobile-nav"
 import { UserNav } from "@/components/dashboard/user-nav"
@@ -10,12 +12,48 @@ import type React from "react"
 import { ProfileProvider } from "@/contexts/profile-context"
 import Link from "next/link"
 import Image from "next/image"
+import { useAuth } from "@/contexts/auth-context"
+import { useRouter } from "next/navigation"
+import { useEffect } from "react"
+import { Skeleton } from "@/components/ui/skeleton"
 
 interface DashboardLayoutProps {
   children: React.ReactNode
 }
 
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
+  const { user, loading } = useAuth()
+  const router = useRouter()
+
+  // Ensure only authenticated users can access the dashboard
+  useEffect(() => {
+    if (!loading && !user) {
+      router.push("/sign-in")
+    }
+  }, [loading, user, router])
+
+  // Show loading state while checking authentication
+  if (loading) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center">
+        <div className="w-full max-w-md space-y-4">
+          <Skeleton className="h-8 w-48 mx-auto" />
+          <Skeleton className="h-72 w-full rounded-lg" />
+          <div className="space-y-2">
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-2/3" />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Don't render dashboard if user is not authenticated
+  if (!user) {
+    return null
+  }
+
   return (
     <TripsProvider>
       <ProfileProvider>
